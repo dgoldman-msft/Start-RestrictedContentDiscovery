@@ -1,0 +1,337 @@
+﻿function Write-ToLog {
+    <#
+        .SYNOPSIS
+            Save output
+
+        .DESCRIPTION
+            Overload function for Write-Output
+
+        .PARAMETER InputString
+            Input string to log.
+
+        .PARAMETER LoggingDirectory
+            Directory to save the log file to. Default is "$env:MyDocuments".
+
+        .PARAMETER LoggingFilename
+            Filename to save the log file to. Default is "RestrictedContentDiscovery.txt".
+
+        .EXAMPLE
+            None
+
+        .NOTES
+            None
+    #>
+
+    [OutputType('System.String')]
+    [CmdletBinding(DefaultParameterSetName = 'Default')]
+    param
+    (
+        [Parameter(Mandatory = $True, Position = 0)]
+        [string]
+        $InputString,
+
+        [Parameter(ParameterSetName = 'Default')]
+        [string]
+        $LoggingDirectory,
+
+        [string]
+        $LoggingFilename,
+
+        [bool]
+        $OutputToConsole = $True
+    )
+
+    try {
+        if (-NOT(Test-Path -Path $LoggingDirectory)) {
+            Write-Verbose "Creating New Logging Directory"
+            New-Item -Path $LoggingDirectory -ItemType Directory -ErrorAction Stop | Out-Null
+        }
+    }
+    catch {
+        Write-Output "$_"
+        return
+    }
+
+    try {
+        # Console and log file output
+        Write-Output "$($InputString)"
+        $stringObject = "[{0:MM/dd/yy} {0:HH:mm:ss}] - {1}" -f (Get-Date), $InputString
+        Add-Content -Path (Join-Path $LoggingDirectory -ChildPath $LoggingFilename) -Value $stringObject -Encoding utf8 -ErrorAction Stop
+        Write-Verbose "Logging to $($LoggingDirectory)\$($LoggingFilename)"
+    }
+    catch {
+        Write-Output "$_"
+        return
+    }
+}
+
+function Start-RestrictedContentDiscovery {
+    <#
+        .SYNOPSIS
+            Start a restricted content discovery.
+
+        .DESCRIPTION
+            This cmdlet is used to limit the ability of end users to search for files from specific SharePoint sites.
+
+        .PARAMETER DisconnectFromSPO
+            A switch parameter that, if specified, will disconnect from SharePoint Online after the report collection is completed.
+
+        .PARAMETER GenerateRCDReport
+            A switch parameter that, if specified, will generate a SharePoint Online Restricted Content Discoverability Report.
+
+        .PARAMETER InputFilePath
+            Input file to use with site ids. This can be a .txt file. This parameter is mandatory.
+            The file should contain a list of site urls, one per line.
+
+        .PARAMETER LoggingDirectory
+            Directory to save the log file to. Default is "$env:MyDocuments\RestrictedContentDiscovery".
+
+        .PARAMETER LoggingFilename
+            Filename to save the log file to. Default is "RestrictedContentDiscovery.txt".
+
+        .PARAMETER RemoveRCDR
+            A switch parameter that, if specified, will remove the restricted content discovery from the site.
+
+        .PARAMETER SetRCDR
+            A switch parameter that, if specified, will set the restricted content discovery for the site.
+
+        .PARAMETER TenantDomain
+            Specifies the domain of the tenant. This parameter is mandatory.
+
+        .EXAMPLE
+            C:\PS> Start-RestrictedContentDiscovery -TenantDomain contoso -SiteUrl "https://tenantname.sharepoint.com/sites/Test" -SetRCD
+
+            This will set the flag which controls whether org-wide content search is enabled for the site specified.
+
+        .EXAMPLE
+            C:\PS> Start-RestrictedContentDiscovery -TenantDomain contoso -SiteUrl "https://tenantname.sharepoint.com/sites/Test" -RemoveRCD
+
+            This will remove the flag which controls whether org-wide content search is enabled for the site specified.
+
+        .EXAMPLE
+            C:\PS> rcd -TenantDomain contoso -SiteUrl "https://tenantname.sharepoint.com/sites/Test" -SetRCD
+
+            Call this function with the alias and set the flag which controls whether org-wide content search is enabled for the site specified.
+
+        .EXAMPLE
+            C:\PS> rcd -TenantDomain contoso -SiteUrl "https://tenantname.sharepoint.com/sites/Test" -RemoveRCD
+
+            Call this function with the alias and remove the flag which controls whether org-wide content search is enabled for the site specified.
+
+        .NOTES
+            For more information please see: https://learn.microsoft.com/en-us/sharepoint/restricted-content-discovery
+
+            The testing is only at the Org-wide search and in Copilot search without referencing the file.
+
+            1. You must have not accessed any content on that site at least in the last 28 days. RCD is to prevent accidental discovery. "Although RCD is applied at a site basis,
+            2. SharePoint indexing happens at the file level, so a fan-out process must find and reindex every file in a site 'before RCD becomes effective for that site'.
+
+            The time required to update the index for a site is highly dependent on the number of items in the site.
+    #>
+
+    [OutputType('System.String')]
+    [CmdletBinding(DefaultParameterSetName = 'Default')]
+    [alias("rcd")]
+    param
+    (
+        [Parameter(ParameterSetName = 'Default', HelpMessage = 'Disconnect from SharePoint Online after the report collection is completed. Default is $false.')]
+        [switch]
+        $DisconnectFromSPO,
+
+        [Parameter(ParameterSetName = 'Default', HelpMessage = 'Generate a SPO Restricted Content Discoverability Report.')]
+        [switch]
+        $GenerateRCDReport,
+
+        [Parameter(ParameterSetName = 'Default', HelpMessage = 'Input file to use with site ids. This can be a .txt or .csv file. This parameter is mandatory.')]
+        [string]
+        $InputFilePath,
+
+        [Parameter(ParameterSetName = 'Default', HelpMessage = 'Specifies the directory to save the log file to. Default is $env:MyDocuments\RestrictedContentDiscovery')]
+        [string]
+        $LoggingDirectory = (Join-Path -Path ([Environment]::GetFolderPath("MyDocuments")) -ChildPath "RestrictedContentDiscovery"),
+
+        [Parameter(ParameterSetName = 'Default', HelpMessage = 'Specifies the filename to save the log file to. Default is RestrictedContentDiscovery.txt')]
+        [string]
+        $LoggingFilename = "RestrictedContentDiscovery.txt",
+
+        [Parameter(ParameterSetName = 'Default', HelpMessage = 'Flag for removing restricted content discovery.')]
+        [switch]
+        $RemoveRCD,
+
+        [Parameter(ParameterSetName = 'Default', HelpMessage = 'Flag for setting restricted content discovery.')]
+        [switch]
+        $SetRCD,
+
+        [Parameter(ParameterSetName = 'Default', HelpMessage = 'SharePoint Site Url. Default is RestrictedContentDiscovery.txt')]
+        [string]
+        $SiteUrl,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'Default', HelpMessage = 'Specifies the domain of the tenant. This parameter is mandatory.')]
+        [string]
+        $TenantDomain
+    )
+
+    $disconnectFromSPO = $true
+    $numOfRCDsProcessed = 0
+    $numOfRCDsSkipped = 0
+    $numOfRCDsRemoved = 0
+    $modules = @('Microsoft.Online.SharePoint.PowerShell')
+
+    # Check if running as administrator
+    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $currentPrincipal = New-Object Security.Principal.WindowsPrincipal($currentUser)
+    if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "This script must be run as an administrator."
+        return
+    }
+    else {
+        Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Starting script execution as administrator."
+    }
+
+    foreach ($module in $modules) {
+        try {
+            # Check if the module is installed
+            if (-not (Get-Module -ListAvailable -Name $module)) {
+                # Install the module
+                Install-Module -Name $module -Force -AllowClobber -ErrorAction SilentlyContinue
+                Write-Verbose "Installed $($module) module."
+                Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Installed $($module) module."
+            }
+            else {
+                Write-Verbose "$($module) already installed."
+                Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "$($module) already installed."
+            }
+
+            # Import the module
+            if (-not (Get-Module -Name $module)) {
+                if ($PSVersionTable.PSEdition -eq "Core" -and $module -eq "Microsoft.Online.SharePoint.PowerShell") {
+                    Import-Module -Name $module -UseWindowsPowerShell -ErrorAction SilentlyContinue
+                    Write-Verbose "Connecting with Windows PowerShell Core Version for $($module)."
+                    Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Connecting with Windows PowerShell Core Version for $($module)."
+                }
+                else {
+                    Import-Module -Name $module -ErrorAction SilentlyContinue
+                    Write-Verbose "Connecting with Windows PowerShell Desktop Version for $($module)."
+                    Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Connecting with Windows PowerShell Desktop Version for $($module)."
+                }
+            }
+            else {
+                Write-Verbose "$($module) module already imported."
+                Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "$($module) module already imported."
+            }
+        }
+        catch {
+            Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Error: $_"
+            return
+        }
+    }
+
+    # Connection to SharePoint Online
+    try {
+        $TenantAdminUrl = "https://$TenantDomain-admin.sharepoint.com"
+        Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Connecting to SharePoint Online."
+        Connect-SPOService -Url $TenantAdminUrl -ErrorAction SilentlyContinue
+        Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Connected to SharePoint Online."
+    }
+    catch {
+        Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Error: $_"
+        return
+    }
+
+    try {
+        # Handle input for site URLs and actions
+        $siteUrls = @()
+        $actionMode = "report" # default mode
+
+        if (-not $InputFilePath -and -not $SiteUrl) {
+            # No input provided, run in report-only mode
+            Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "No InputFilePath or SiteUrl provided."
+            if($GenerateRCDReport) {
+                Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Generating report for all sites."
+                try {
+                    Start-SPORestrictedContentDiscoverabilityReport -Force
+                }
+                catch {
+                    Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Error: $_"
+                }
+                $report = Get-SPORestrictedContentDiscoverabilityReport | Out-String
+                Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString $report
+            }
+            else {
+                Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "No action specified. Exiting."
+                return
+            }
+        }
+        elseif ($InputFilePath) {
+            if (-not (Test-Path -Path $InputFilePath)) {
+                Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Error: Input file not found at $($InputFilePath)."
+                return
+            }
+            elseif ($InputFilePath -like "*.txt") {
+                $siteUrls = Get-Content -Path $InputFilePath -ErrorAction Stop
+                Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Site URLs read from text file. Found $($siteUrls.Count) site URLs."
+            }
+            else {
+                Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Error: Unsupported file format. Please provide a .csv or .txt file."
+                return
+            }
+            $actionMode = "process"
+        }
+        elseif ($SiteUrl) {
+            $siteUrls = @($SiteUrl)
+            Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Single SiteUrl provided: $SiteUrl"
+            $actionMode = "process"
+        }
+        else {
+            Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Error: Unsupported input."
+            return
+        }
+
+        if ($actionMode -eq "process") {
+            foreach ($url in $siteUrls) {
+                if (-not [string]::IsNullOrWhiteSpace($url)) {
+                    if ($RemoveRCD) {
+                        Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Removing restricted content discovery for site: $($url)"
+                        Set-SPOSite -Identity $url -RestrictContentOrgWideSearch $false
+                        $numOfRCDsRemoved++
+                        $siteReport = (Get-SpoSite -Identity $url | Select-Object Title, Url, RestrictContentOrgWideSearch | ForEach-Object { "Title: $($_.Title) - Url: $($_.Url) - RestrictContentOrgWideSearch: $($_.RestrictContentOrgWideSearch)" }).Trim()
+                        Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString $siteReport
+                    }
+                    elseif ($SetRCD) {
+                        Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Setting restricted content discovery for site: $($url)"
+                        Set-SPOSite -Identity $url -RestrictContentOrgWideSearch $true
+                        $numOfRCDsProcessed++
+                        $siteReport = (Get-SpoSite -Identity $url | Select-Object Title, Site, Url, RestrictContentOrgWideSearch | ForEach-Object { "Title: $($_.Title) - Url: $($_.Url) - RestrictContentOrgWideSearch: $($_.RestrictContentOrgWideSearch)" }).Trim()
+                        Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString $siteReport
+                    }
+                }
+                else {
+                    Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Skipping empty Site: $($url)."
+                    $numOfRCDsSkipped++
+                }
+            }
+        }
+    }
+    catch {
+        Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Error: $_"
+    }
+    finally {
+        # Disconnect from SharePoint Online if connected
+        if ($DisconnectFromSPO -eq $True) {
+            Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Disconnecting from the SPOService."
+            Disconnect-SPOService
+        }
+        else {
+            Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Not disconnecting from the SPOService."
+        }
+
+        if ($actionMode -eq "process") {
+            Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "`Total Restricted Content Discoveries set: $($numOfRCDsProcessed)"
+            Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Total Restricted Content Discoveries skipped: $($numOfRCDsSkipped)"
+            Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Total Restricted Content Discoveries removed: $($numOfRCDsRemoved)"
+        }
+
+        Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "For more information please see the logging file: $($LoggingDirectory)\$($LoggingFilename)"
+        Write-ToLog -LoggingDirectory $LoggingDirectory -LoggingFilename $LoggingFilename -InputString "Script completed."
+    }
+}
